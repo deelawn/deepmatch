@@ -11,6 +11,148 @@ import (
 	"testing"
 )
 
+var matchesTests = []struct{
+	name string
+	matcher Matcher
+	v1 interface{}
+	v2 interface{}
+	shouldMatch bool
+}{
+	{
+		name: "match exclude exported",
+		matcher: Matcher{
+			ExcludeUnexported: true,
+		},
+		v1: struct {
+			A int
+			b string
+		}{A: 5, b: "asdf"},
+		v2: struct {
+			A int
+			b string
+		}{A: 5, b: "7777"},
+		shouldMatch: true,
+	},
+	{
+		name: "no match",
+		matcher: Matcher{},
+		v1: struct {
+			A int
+			b string
+		}{A: 5, b: "asdf"},
+		v2: struct {
+			A int
+			b string
+		}{A: 5, b: "7777"},
+		shouldMatch: false,
+	},
+	{
+		name: "match exclude exported",
+		matcher: Matcher{
+			ExcludeExported: true,
+		},
+		v1: struct {
+			A int
+			b string
+		}{A: 9, b: "asdf"},
+		v2: struct {
+			A int
+			b string
+		}{A: 5, b: "asdf"},
+		shouldMatch: true,
+	},
+	{
+		name: "match exclude exported depth 1",
+		matcher: Matcher{
+			MaxDepth: 1,
+			ExcludeExported: true,
+		},
+		v1: struct {
+			A int
+			b string
+		}{A: 9, b: "asdf"},
+		v2: struct {
+			A int
+			b string
+		}{A: 5, b: "asdf"},
+		shouldMatch: true,
+	},
+	{
+		name: "match exclude exported field name",
+		matcher: Matcher{
+			ExcludedFieldNames: []string{"A"},
+		},
+		v1: struct {
+			A int
+			b string
+		}{A: 9, b: "asdf"},
+		v2: struct {
+			A int
+			b string
+		}{A: 5, b: "asdf"},
+		shouldMatch: true,
+	},
+	{
+		name: "match exclude unexported field name",
+		matcher: Matcher{
+			ExcludedFieldNames: []string{"b"},
+		},
+		v1: struct {
+			A int
+			b string
+		}{A: 9, b: "ifoajweioajwef"},
+		v2: struct {
+			A int
+			b string
+		}{A: 9, b: "asdf"},
+		shouldMatch: true,
+	},
+	{
+		name: "no match nested structs",
+		matcher: Matcher{},
+		v1: struct {
+			A int
+			b struct{a int}
+		}{A: 9, b: struct{a int}{4}},
+		v2: struct {
+			A int
+			b struct{a int}
+		}{A: 9, b: struct{a int}{7}},
+		shouldMatch: false,
+	},
+	{
+		name: "match nested structs depth 1",
+		matcher: Matcher{
+			MaxDepth: 1,
+		},
+		v1: struct {
+			A int
+			b struct{a int}
+		}{A: 9, b: struct{a int}{4}},
+		v2: struct {
+			A int
+			b struct{a int}
+		}{A: 9, b: struct{a int}{7}},
+		shouldMatch: true,
+	},
+}
+
+func TestValueMatcher_Matches(t *testing.T) {
+
+	for _, tt := range matchesTests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := tt.matcher.NewValueMatcher(tt.v1)
+			result := vm.Matches(tt.v2)
+			if tt.shouldMatch != result {
+				t.Errorf("got %t, want %t", result, tt.shouldMatch)
+			}
+		})
+	}
+}
+
+// All tests below this point were copied from the reflect standard library; I tried to copy over everything
+// that made use of DeepEqual. They've been slightly modified so that the tests compile.
+
 var matcher Matcher
 
 type integer int
