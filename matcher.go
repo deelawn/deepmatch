@@ -9,7 +9,7 @@ import (
 type Matcher struct {
 	// MaxDepth is the number of times Match can be called recursively when dealing with nested data structures.
 	// A value of 0 means that there is no maximum depth.
-	MaxDepth uint
+	MaxDepth int
 	// ExcludeExported is set to true when equality checks should skip exported fields.
 	ExcludeExported bool
 	// ExcludeUnexported is set to true when equality checks should skip unexported fields.
@@ -17,6 +17,8 @@ type Matcher struct {
 	// ExcludedFieldNames is a list of field names that should not be checked for equality. Dot separators need
 	// to be used to separate structure name from field name.
 	ExcludedFieldNames []string
+	// excludedFieldNamesMap makes it easier to check if a field should be excluded
+	excludedFieldNamesMap map[string]bool
 }
 
 // NewValueMatcher returns a type, ValueMatcher, that stores both m and a value
@@ -39,7 +41,14 @@ func (m Matcher) Matches(x, y interface{}) bool {
 	if v1.Type() != v2.Type() {
 		return false
 	}
-	return matchesValue(v1, v2, make(map[visit]bool), 0)
+
+	// Define this each time Matches is called
+	m.excludedFieldNamesMap = map[string]bool{}
+	for _, fieldName := range m.ExcludedFieldNames {
+		m.excludedFieldNamesMap[fieldName] = true
+	}
+
+	return m.matchesValue(v1, v2, make(map[visit]bool), 0)
 }
 
 // During deepValueEqual, must keep track of checks that are
@@ -58,7 +67,23 @@ func reflect_valueInterface(v reflect.Value, safe bool) interface{}
 // Tests for deep equality using reflected types. The map argument tracks
 // comparisons that have already been seen, which allows short circuiting on
 // recursive types.
-func matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool {
+func (m Matcher) matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool {
+
+	// Skip comparison if we are past the maximum depth
+	if m.MaxDepth != 0 && depth > m.MaxDepth {
+		return true
+	}
+
+	// Skip comparison if one of these is unexported and we are not comparing unexported
+	if m.ExcludeUnexported && (!v1.CanInterface() || !v2.CanInterface()) {
+		return true
+	}
+
+	// Skip comparison if one of these is exported and we are not comparing exported values
+	if m.ExcludeExported && (v1.CanInterface() || v2.CanInterface()) {
+		return true
+	}
+
 	if !v1.IsValid() || !v2.IsValid() {
 		return v1.IsValid() == v2.IsValid()
 	}
@@ -116,7 +141,7 @@ func matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool 
 	switch v1.Kind() {
 	case reflect.Array:
 		for i := 0; i < v1.Len(); i++ {
-			if !matchesValue(v1.Index(i), v2.Index(i), visited, depth+1) {
+			if !m.matchesValue(v1.Index(i), v2.Index(i), visited, depth+1) {
 				return false
 			}
 		}
@@ -132,7 +157,7 @@ func matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool 
 			return true
 		}
 		for i := 0; i < v1.Len(); i++ {
-			if !matchesValue(v1.Index(i), v2.Index(i), visited, depth+1) {
+			if !m.matchesValue(v1.Index(i), v2.Index(i), visited, depth+1) {
 				return false
 			}
 		}
@@ -141,15 +166,20 @@ func matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool 
 		if v1.IsNil() || v2.IsNil() {
 			return v1.IsNil() == v2.IsNil()
 		}
-		return matchesValue(v1.Elem(), v2.Elem(), visited, depth+1)
+		return m.matchesValue(v1.Elem(), v2.Elem(), visited, depth+1)
 	case reflect.Ptr:
 		if v1.Pointer() == v2.Pointer() {
 			return true
 		}
-		return matchesValue(v1.Elem(), v2.Elem(), visited, depth+1)
+		return m.matchesValue(v1.Elem(), v2.Elem(), visited, depth+1)
 	case reflect.Struct:
 		for i, n := 0, v1.NumField(); i < n; i++ {
-			if !matchesValue(v1.Field(i), v2.Field(i), visited, depth+1) {
+			// These fields should have the same name; continue if they should be skipped
+			if m.excludedFieldNamesMap[v1.Type().Field(i).Name] {
+				continue
+			}
+
+			if !m.matchesValue(v1.Field(i), v2.Field(i), visited, depth+1) {
 				return false
 			}
 		}
@@ -167,7 +197,7 @@ func matchesValue(v1, v2 reflect.Value, visited map[visit]bool, depth int) bool 
 		for _, k := range v1.MapKeys() {
 			val1 := v1.MapIndex(k)
 			val2 := v2.MapIndex(k)
-			if !val1.IsValid() || !val2.IsValid() || !matchesValue(val1, val2, visited, depth+1) {
+			if !val1.IsValid() || !val2.IsValid() || !m.matchesValue(val1, val2, visited, depth+1) {
 				return false
 			}
 		}
