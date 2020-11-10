@@ -2,6 +2,7 @@ package deepmatch
 
 import (
 	"reflect"
+	"strings"
 	"unsafe"
 )
 
@@ -71,20 +72,6 @@ func (m Matcher) matchesValue(v1, v2 reflect.Value, visited map[visit]bool, dept
 
 	// Skip comparison if we are past the maximum depth
 	if m.MaxDepth != 0 && depth > m.MaxDepth {
-		return true
-	}
-
-	// For excluding unexported and exported fields, each call to CanInterface needs to be preceded by
-	// a call to IsValid because calling CanInterface on an invalid valid will panic. If either value is
-	// invalid then it will be caught after these exclusions in the subsequent IsValid checks.
-
-	// Skip comparison if one of these is unexported and we are not comparing unexported
-	if m.ExcludeUnexported && ((v1.IsValid() && !v1.CanInterface()) || (v2.IsValid() && !v2.CanInterface())) {
-		return true
-	}
-
-	// Skip comparison if one of these is exported and we are not comparing exported values
-	if m.ExcludeExported && ((v1.IsValid() && v1.CanInterface()) || (v2.IsValid() && v2.CanInterface())) {
 		return true
 	}
 
@@ -178,8 +165,18 @@ func (m Matcher) matchesValue(v1, v2 reflect.Value, visited map[visit]bool, dept
 		return m.matchesValue(v1.Elem(), v2.Elem(), visited, depth+1)
 	case reflect.Struct:
 		for i, n := 0, v1.NumField(); i < n; i++ {
+			sf := v1.Type().Field(i)
 			// These fields should have the same name; continue if they should be skipped
-			if m.excludedFieldNamesMap[v1.Type().Field(i).Name] {
+			if m.excludedFieldNamesMap[sf.Name] {
+				continue
+			}
+
+			// Use the field name to determine whether or not this field is exported
+			upperName := strings.ToUpper(sf.Name)
+			if upperName[0] == sf.Name[0] && m.ExcludeExported {
+				continue
+			}
+			if upperName[0] != sf.Name[0] && m.ExcludeUnexported {
 				continue
 			}
 
