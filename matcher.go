@@ -74,13 +74,17 @@ func (m Matcher) matchesValue(v1, v2 reflect.Value, visited map[visit]bool, dept
 		return true
 	}
 
+	// For excluding unexported and exported fields, each call to CanInterface needs to be preceded by
+	// a call to IsValid because calling CanInterface on an invalid valid will panic. If either value is
+	// invalid then it will be caught after these exclusions in the subsequent IsValid checks.
+
 	// Skip comparison if one of these is unexported and we are not comparing unexported
-	if m.ExcludeUnexported && (!v1.CanInterface() || !v2.CanInterface()) {
+	if m.ExcludeUnexported && ((v1.IsValid() && !v1.CanInterface()) || (v2.IsValid() && !v2.CanInterface())) {
 		return true
 	}
 
 	// Skip comparison if one of these is exported and we are not comparing exported values
-	if m.ExcludeExported && (v1.CanInterface() || v2.CanInterface()) {
+	if m.ExcludeExported && ((v1.IsValid() && v1.CanInterface()) || (v2.IsValid() && v2.CanInterface())) {
 		return true
 	}
 
